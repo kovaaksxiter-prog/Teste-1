@@ -1,0 +1,223 @@
+--====================================================
+-- SERVICES
+--====================================================
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local LOCAL_PLAYER = Players.LocalPlayer
+
+--====================================================
+-- CONFIG (VOCÊ CONTROLA NA UI DEPOIS)
+--====================================================
+local Config = {
+    highlightEnabled = true,
+    autoBlockEnabled = true,
+    autoClashEnabled = true,
+
+    -- Keybinds (toggle)
+    highlightKey = Enum.KeyCode.F,
+    autoBlockKey = Enum.KeyCode.B,
+    autoClashKey = Enum.KeyCode.H,
+
+    -- Mecânica
+    clashRange = 7,
+
+    -- Timings
+    blockClickDelay = 0.05,     -- LMB
+    clashClickDelay = 0.05,     -- RMB
+    postDefenseWindow = 0.35,   -- janela após defesa
+    globalCooldown = 0.15       -- anti spam
+}
+
+--====================================================
+-- ⚠️ SAFE ANIMATIONS (INALTERADA)
+--====================================================
+local SAFE_ANIMATIONS = {
+    ["180426354"]=true,["180435792"]=true,["180435557"]=true,["180435571"]=true,
+    ["684969250"]=true,["12246410284"]=true,["684949179"]=true,["180436148"]=true,
+    ["7950784441"]=true,["12245963642"]=true,["16398226659"]=true,["6691954521"]=true,
+    ["6768460286"]=true,["6835294179"]=true,["6835294624"]=true,["6835295587"]=true,
+    ["6835295340"]=true,["6835295768"]=true,["6843685401"]=true,["6843686183"]=true,
+    ["6843688241"]=true,["6844129816"]=true,["6844132951"]=true,["6848072990"]=true,
+    ["6857596237"]=true,["6887306042"]=true,["6887334158"]=true,["6891877544"]=true,
+    ["6910931126"]=true,["9819726292"]=true,["9819735529"]=true,["9819745648"]=true,
+    ["9819790668"]=true,["9819806597"]=true,["9819811478"]=true,["9819823356"]=true,
+    ["9819830644"]=true,["9822389499"]=true,["9825822267"]=true,["9825834442"]=true,
+    ["6846937588"]=true,["6846943217"]=true,["11116879670"]=true,["10950534442"]=true,
+    ["11116773443"]=true,["11116829154"]=true,["11116842345"]=true,["11116851650"]=true,
+    ["11116868980"]=true,["11116876082"]=true,["11116879769"]=true,["11116883670"]=true,
+    ["11116904044"]=true,["11116906510"]=true,["11116911916"]=true,["11116928049"]=true,
+    ["11116935344"]=true,["11116942197"]=true,["11116953107"]=true,
+    ["11739213999"]=true,["11739218535"]=true,["11739221487"]=true,
+    ["11824454279"]=true,["12110667126"]=true,["12110738932"]=true,
+    ["12110743424"]=true,["12119297992"]=true,["15171648575"]=true,
+    ["15434704458"]=true,["15434415778"]=true,["15434491089"]=true,
+    ["15434493570"]=true,["15744847038"]=true,["16203609238"]=true,
+    ["16294404827"]=true,["17003507450"]=true,["18357490871"]=true,
+    ["18570567181"]=true,["18570580687"]=true,["18570584513"]=true,
+    ["18570587568"]=true,["18570592488"]=true,["18570596139"]=true,
+    ["6849692501"]=true,["6849441527"]=true,["7950763400"]=true,
+    ["7814314769"]=true,["6849491789"]=true,["6835295052"]=true,
+    ["6849489471"]=true,["8201303807"]=true,["10697528876"]=true,
+    ["8201293554"]=true,["16398208032"]=true,["11580783004"]=true,
+    ["18570602813"]=true,["18570605663"]=true,["18570610312"]=true,
+    ["18570613289"]=true,["18570616732"]=true,["18570620535"]=true,
+    ["18570623746"]=true,["18570626263"]=true,["18570632470"]=true,
+    ["18570671957"]=true,["18570683512"]=true,["18570687683"]=true,
+    ["18850450498"]=true,["85696117023177"]=true,["123461108716822"]=true,
+    ["1190149394074304"]=true,["116839058176293"]=true,
+    ["752942489704875"]=true,["130879133604226"]=true,["11580787715"]=true,
+    ["6835295057"]=true,["7814305242"]=true,["119813141112551"]=true,
+    ["16205809238"]=true,["80008594862427"]=true
+}
+
+--====================================================
+-- INPUT (CLICKS)
+--====================================================
+local function clickLMB(delay)
+    VirtualInputManager:SendMouseButtonEvent(0,0,0,true,game,0)
+    task.wait(delay)
+    VirtualInputManager:SendMouseButtonEvent(0,0,0,false,game,0)
+end
+
+local function clickRMB(delay)
+    VirtualInputManager:SendMouseButtonEvent(0,1,0,true,game,0)
+    task.wait(delay)
+    VirtualInputManager:SendMouseButtonEvent(0,1,0,false,game,0)
+end
+
+--====================================================
+-- UTILS
+--====================================================
+local function normalizeAnimationId(id)
+    return id:match("id=(%d+)") or id:match("%d+")
+end
+
+local function isInRange(target)
+    local c1 = LOCAL_PLAYER.Character
+    local c2 = target.Character
+    if not c1 or not c2 then return false end
+
+    local r1 = c1:FindFirstChild("HumanoidRootPart")
+    local r2 = c2:FindFirstChild("HumanoidRootPart")
+    if not r1 or not r2 then return false end
+
+    return (r1.Position - r2.Position).Magnitude <= Config.clashRange
+end
+
+--====================================================
+-- ARENA CHECK
+--====================================================
+local function GetCurrentArena()
+    if not workspace:FindFirstChild("Arenas") then return end
+    for _, arena in ipairs(workspace.Arenas:GetChildren()) do
+        local info = arena:FindFirstChild("Info")
+        local active = info and info:FindFirstChild("Active")
+        if not (active and active.Value) then continue end
+
+        local p1 = info:FindFirstChild("P1", true)
+        local p2 = info:FindFirstChild("P2", true)
+
+        if p1 and p2 then
+            if p1.Title.Text == LOCAL_PLAYER.Name then
+                return arena, p2.Title.Text
+            elseif p2.Title.Text == LOCAL_PLAYER.Name then
+                return arena, p1.Title.Text
+            end
+        end
+    end
+end
+
+--====================================================
+-- TIMERS
+--====================================================
+local lastDefenseTime = {}
+local lastActionTime = {}
+
+--====================================================
+-- CORE LOGIC
+--====================================================
+local function onEnemyAttack(player)
+    if not Config.highlightEnabled then return end
+    if not isInRange(player) then return end
+
+    local _, opponent = GetCurrentArena()
+    if opponent ~= player.Name then return end
+
+    local now = tick()
+    if lastActionTime[player] and now - lastActionTime[player] < Config.globalCooldown then return end
+    lastActionTime[player] = now
+
+    local char = player.Character
+    if char then
+        if char:FindFirstChild("AttackHighlight") then
+            char.AttackHighlight:Destroy()
+        end
+
+        local hl = Instance.new("Highlight")
+        hl.Name = "AttackHighlight"
+        hl.FillColor = Color3.fromRGB(255,255,0)
+        hl.FillTransparency = 0.5
+        hl.Parent = char
+
+        task.delay(0.6, function()
+            if hl.Parent then hl:Destroy() end
+        end)
+    end
+
+    if Config.autoBlockEnabled then
+        clickLMB(Config.blockClickDelay)
+    end
+
+    if Config.autoClashEnabled and lastDefenseTime[player] then
+        if now - lastDefenseTime[player] <= Config.postDefenseWindow then
+            clickRMB(Config.clashClickDelay)
+        end
+    end
+end
+
+--====================================================
+-- ANIMATION TRACKING
+--====================================================
+local function handleAnimation(player, track)
+    if player == LOCAL_PLAYER then return end
+
+    local id = normalizeAnimationId(track.Animation.AnimationId)
+
+    if SAFE_ANIMATIONS[id] then
+        lastDefenseTime[player] = tick()
+        return
+    end
+
+    onEnemyAttack(player)
+end
+
+local function trackPlayer(player)
+    local function onChar(char)
+        local animator = char:WaitForChild("Humanoid"):WaitForChild("Animator")
+        animator.AnimationPlayed:Connect(function(track)
+            handleAnimation(player, track)
+        end)
+    end
+    if player.Character then onChar(player.Character) end
+    player.CharacterAdded:Connect(onChar)
+end
+
+--====================================================
+-- KEYBINDS
+--====================================================
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Config.highlightKey then Config.highlightEnabled = not Config.highlightEnabled end
+    if input.KeyCode == Config.autoBlockKey then Config.autoBlockEnabled = not Config.autoBlockEnabled end
+    if input.KeyCode == Config.autoClashKey then Config.autoClashEnabled = not Config.autoClashEnabled end
+end)
+
+--====================================================
+-- INIT
+--====================================================
+for _, p in ipairs(Players:GetPlayers()) do
+    trackPlayer(p)
+end
+Players.PlayerAdded:Connect(trackPlayer)
